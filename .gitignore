@@ -1,0 +1,32 @@
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Node
+node_modules/
+
+# Production bundle — Vercel builds this from source, it should not be committed
+frontend/build/
+
+# Python
+__pycache__/
+
+# Runtime-generated custom profiles (added via the Manage Profiles GUI)
+backend/custom_profiles.json
+
+# Auth + per-user data (accounts, sessions, per-user profiles/history/generated files,
+# and each user's Google Drive refresh token)
+backend/users.json
+backend/user_data/
+
+# Admin-editable settings — holds the live OpenAI API + Admin keys
+backend/app_settings.json
+
+# Local env files
+.env
+frontend/.env
+frontend/.env.local
+
+.tmp.driveupload/
+.tmp.drivedownload/
