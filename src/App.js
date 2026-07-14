@@ -220,6 +220,22 @@ function App() {
       .finally(() => setProfilesLoaded(true));
   }, []);
 
+  // Pick up the session the server remembers for this account. The job links and the
+  // uploaded job-description files are stored per user on the backend and survive both a
+  // page reload and a backend restart, so a crash partway through a batch no longer means
+  // pasting fifty links again. Anything already typed into the box wins over the restore.
+  useEffect(() => {
+    axios
+      .get(`${API_BASE_URL}/api/jobs`)
+      .then((res) => {
+        const urls = (res.data?.jobs || []).map((j) => j.url).filter(Boolean);
+        if (urls.length) setJobLinksText((current) => (current.trim() ? current : urls.join('\n')));
+      })
+      .catch(() => {});
+    loadJdList();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // No profile assigned (or the admin revoked them all) — nothing here can be generated.
   const noProfileAssigned = profilesLoaded && profileOptions.length === 0;
 
