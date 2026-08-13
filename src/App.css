@@ -777,3 +777,182 @@
 .results-header h3 {
   margin: 0;
 }
+
+/* --- Admin usage & governance panel --------------------------------------- */
+
+/* The filter bar. Every control here re-queries the server, so the tiles, tables
+   and the CSV export can never disagree about what is being shown. */
+.usage-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px 16px;
+  margin-top: 16px;
+  padding: 14px 16px;
+  border: 1px solid #e2e3e5;
+  border-radius: 10px;
+  background: #f8f9fa;
+}
+
+.usage-filter {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* The search box eats whatever width is left on the row. */
+.usage-filter-grow {
+  flex: 1 1 240px;
+  min-width: 200px;
+}
+
+.usage-filter-label {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #6c757d;
+}
+
+.usage-filter .form-input,
+.usage-filter select.form-input {
+  padding: 5px 8px;
+  font-size: 14px;
+  min-height: 32px;
+}
+
+.usage-quick-ranges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.usage-segmented {
+  display: inline-flex;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.usage-segment {
+  padding: 6px 14px;
+  border: none;
+  border-right: 1px solid #e0e0e0;
+  background: transparent;
+  font-size: 14px;
+  color: #444;
+  cursor: pointer;
+}
+
+.usage-segment:last-child {
+  border-right: none;
+}
+
+.usage-segment:hover {
+  background: #f1f3f4;
+}
+
+.usage-segment-active,
+.usage-segment-active:hover {
+  background: #1a73e8;
+  color: #fff;
+}
+
+/* Tabs across the different ways of slicing the same filtered set. */
+.usage-views {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 20px;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.usage-view {
+  padding: 8px 14px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  font-size: 14px;
+  color: #555;
+  cursor: pointer;
+}
+
+.usage-view:hover {
+  color: #1a73e8;
+}
+
+.usage-view-active,
+.usage-view-active:hover {
+  color: #1a73e8;
+  border-bottom-color: #1a73e8;
+  font-weight: 600;
+}
+
+/* The tile for the selected range, marked out from the fixed "right now" ones. */
+.admin-spend-tile-accent {
+  border-color: #1a73e8;
+  background: #e8f0fe;
+}
+
+/* User × period grid: many narrow columns, with the user column pinned so the
+   name stays readable while scrolling across dates. */
+.usage-matrix {
+  min-width: max-content;
+}
+
+.usage-matrix th,
+.usage-matrix td {
+  text-align: center;
+  white-space: nowrap;
+}
+
+.usage-matrix .usage-matrix-user {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  text-align: left;
+  background: #fff;
+  min-width: 180px;
+}
+
+.usage-matrix thead .usage-matrix-user {
+  background: #f8f9fa;
+}
+
+.usage-cell-hit {
+  font-weight: 600;
+  color: #1a73e8;
+}
+
+.usage-cell-empty {
+  color: #c5c9cc;
+}
+
+.usage-breakdown-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+}
+
+.usage-breakdown-title {
+  margin: 16px 0 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #444;
+}
+
+/* A table cell that filters the panel when clicked. */
+.link-button {
+  padding: 0;
+  border: none;
+  background: none;
+  color: #1a73e8;
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.link-button:hover {
+  text-decoration: underline;
+}
