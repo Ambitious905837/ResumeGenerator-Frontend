@@ -956,3 +956,218 @@
 .link-button:hover {
   text-decoration: underline;
 }
+
+
+/* --- Backend logs panel ---------------------------------------------------- */
+
+/* The log is long and mostly uninteresting, so the panel opens on demand rather
+   than querying the log file every time an admin loads this page. */
+.log-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.log-head .section-title,
+.log-head .section-desc {
+  margin-top: 0;
+}
+
+.log-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.log-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  margin: 14px 0 6px;
+}
+
+.log-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.log-auto {
+  font-size: 13px;
+  color: #555;
+  cursor: pointer;
+  user-select: none;
+}
+
+/* Monospace and tight: these rows are read by scanning, not by reading. */
+.log-table {
+  font-size: 13px;
+}
+
+.log-table td {
+  vertical-align: top;
+}
+
+.log-row {
+  cursor: pointer;
+}
+
+.log-row-open {
+  background: #f1f3f4;
+}
+
+.log-time {
+  white-space: nowrap;
+  color: #6c757d;
+  font-variant-numeric: tabular-nums;
+}
+
+.log-event code {
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.log-msg {
+  min-width: 320px;
+}
+
+.log-rid {
+  white-space: nowrap;
+}
+
+/* Level is the first thing scanned for, so it is a colour before it is a word. */
+.log-level {
+  display: inline-block;
+  min-width: 62px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
+  letter-spacing: 0.03em;
+}
+
+.log-level-error {
+  background: #fce8e6;
+  color: #c5221f;
+}
+
+.log-level-warn {
+  background: #fef7e0;
+  color: #b06000;
+}
+
+.log-level-info {
+  background: #e8f0fe;
+  color: #1a73e8;
+}
+
+.log-level-debug {
+  background: #f1f3f4;
+  color: #5f6368;
+}
+
+.log-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-left: 8px;
+}
+
+.log-chip {
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: #f1f3f4;
+  color: #5f6368;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.log-detail-row td {
+  background: #fafbfc;
+}
+
+/* The full record, for the fields the row could not fit. */
+.log-detail {
+  margin: 0;
+  padding: 10px 12px;
+  max-height: 320px;
+  overflow: auto;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #333;
+}
+
+.log-pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+/* One request, in order: the view that shows which document failed and why. */
+.log-trace {
+  margin: 16px 0;
+  padding: 14px 16px;
+  border: 1px solid #1a73e8;
+  border-radius: 10px;
+  background: #f8faff;
+}
+
+.log-trace-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.log-timeline {
+  margin: 0;
+  padding-left: 18px;
+  max-height: 420px;
+  overflow-y: auto;
+}
+
+.log-timeline-item {
+  padding: 6px 0 6px 8px;
+  border-left: 3px solid #dadce0;
+}
+
+.log-timeline-item.log-level-error {
+  border-left-color: #c5221f;
+}
+
+.log-timeline-item.log-level-warn {
+  border-left-color: #f29900;
+}
+
+.log-timeline-item.log-level-info {
+  border-left-color: #1a73e8;
+}
+
+.log-timeline-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.log-timeline-msg {
+  font-size: 13px;
+  color: #333;
+}
+
+.log-timeline-error {
+  margin-top: 2px;
+  font-size: 12px;
+  color: #c5221f;
+  word-break: break-word;
+}

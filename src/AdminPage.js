@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import axios from 'axios';
 import { useAuth, API_BASE_URL } from './auth';
+import LogsPanel from './LogsPanel';
 
 // Rows shown per page in the raw usage log. The aggregates above it always cover the
 // whole filtered set — only this table is paged.
@@ -1076,6 +1077,9 @@ function AdminPage() {
           </>
         )}
       </div>
+
+      {/* Backend logs */}
+      <LogsPanel />
 
       {/* Users / roles */}
       <div className="card">
