@@ -92,6 +92,9 @@ function App() {
   const [results, setResults] = useState([]);
   const [scrapeResults, setScrapeResults] = useState([]);
   const [message, setMessage] = useState({ type: '', text: '' });
+  // Reported up by DriveCard. `loaded` stays false until the first /api/drive/status
+  // answer, so we don't flash "not connected" at a user who is connected.
+  const [driveStatus, setDriveStatus] = useState({ connected: false, configured: true, loaded: false });
 
   // Upload TXT -> DOCX (resume + cover letter separate downloads); supports multiple files
   const [txtFiles, setTxtFiles] = useState([]);
@@ -239,6 +242,18 @@ function App() {
   // No profile assigned (or the admin revoked them all) — nothing here can be generated.
   const noProfileAssigned = profilesLoaded && profileOptions.length === 0;
 
+  // Generating requires a connected Google Drive — that is where every generated file
+  // is saved and where the resume PDF is made. The backend rejects generate calls
+  // without it (409); this mirrors the rule in the UI so the buttons say so up front.
+  // Stable identity: DriveCard fetches on a callback that depends on this one.
+  const handleDriveStatus = useCallback((status) => {
+    setDriveStatus({ ...status, loaded: true });
+  }, []);
+  const driveBlocked = !driveStatus.connected;
+  const driveBlockedText = driveStatus.configured === false
+    ? 'Google Drive is not configured on this server, so nothing can be generated. Ask an administrator to finish the setup.'
+    : 'Connect your Google Drive above to generate. Every generated resume, cover letter and job description is saved there.';
+
   const parseLinks = (text) => {
     return text
       .split(/[\n,]+/)
@@ -278,6 +293,10 @@ function App() {
     const urls = parseLinks(jobLinksText);
     if (urls.length === 0) {
       setMessage({ type: 'error', text: 'Please paste at least one job link (one per line or comma-separated).' });
+      return;
+    }
+    if (driveBlocked) {
+      setMessage({ type: 'error', text: driveBlockedText });
       return;
     }
 
@@ -405,6 +424,10 @@ function App() {
       setTxtMessage({ type: 'error', text: 'Please select one or more .txt files first.' });
       return;
     }
+    if (driveBlocked) {
+      setTxtMessage({ type: 'error', text: driveBlockedText });
+      return;
+    }
     setTxtUploading(true);
     setTxtMessage({ type: '', text: '' });
     try {
@@ -491,6 +514,10 @@ function App() {
       setJdMessage({ type: 'error', text: 'Upload job descriptions first.' });
       return;
     }
+    if (driveBlocked) {
+      setJdMessage({ type: 'error', text: driveBlockedText });
+      return;
+    }
     setJdLoading(true);
     setJdMessage({ type: '', text: '' });
     setJdResults([]);
@@ -556,8 +583,9 @@ function App() {
         Paste job links below. We’ll generate a tailored resume and cover letter for each job and save them in folders named by company and role.
       </p>
 
-      {/* Connect Google Drive so generated files are mirrored there automatically */}
-      <DriveCard />
+      {/* Connect Google Drive so generated files are mirrored there automatically.
+          It is also a hard precondition for generating — see driveBlocked. */}
+      <DriveCard onStatusChange={handleDriveStatus} />
 
       {/* Generated resumes — the one table; also the only place downloads happen. */}
       <div className="card">
@@ -833,14 +861,19 @@ function App() {
                 </>
               )}
             </div>
+            {driveStatus.loaded && driveBlocked && (
+              <div className="alert alert-error">{driveBlockedText}</div>
+            )}
             <div className="form-group" style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+              {/* Scraping only saves job descriptions — it costs nothing and needs no Drive. */}
               <button className="btn btn-secondary" onClick={scrapeAll} disabled={loading || !candidateName}>
                 {loading ? 'Scraping…' : 'Scrape job links (save .txt files)'}
               </button>
               <button
                 className="btn btn-primary btn-generate"
                 onClick={generateAll}
-                disabled={loading || !candidateName}
+                disabled={loading || !candidateName || driveBlocked}
+                title={driveBlocked ? driveBlockedText : undefined}
               >
                 {loading ? 'Generating…' : 'Generate from job links'}
               </button>
@@ -850,7 +883,12 @@ function App() {
                 <p className="muted" style={{ marginTop: '1rem' }}>
                   {jdList.count} job description(s) ready. {jdList.has_resumegpt ? 'Custom ResumeGPT loaded.' : 'Using default ResumeGPT.'}
                 </p>
-                <button className="btn btn-primary" onClick={generateFromJdAll} disabled={jdLoading || !candidateName}>
+                <button
+                  className="btn btn-primary"
+                  onClick={generateFromJdAll}
+                  disabled={jdLoading || !candidateName || driveBlocked}
+                  title={driveBlocked ? driveBlockedText : undefined}
+                >
                   {jdLoading ? 'Generating…' : `Generate resume & cover letter for all ${jdList.count} job(s)`}
                 </button>
                 {jdLoading && jdProgress.total > 0 && (
@@ -909,10 +947,14 @@ function App() {
             <span className="file-name">{txtFiles.length} file(s) selected: {txtFiles.map((f) => f.name).join(', ')}</span>
           )}
         </div>
+        {driveStatus.loaded && driveBlocked && (
+          <div className="alert alert-error">{driveBlockedText}</div>
+        )}
         <button
           className="btn btn-primary"
           onClick={convertTxtToDocx}
-          disabled={txtUploading || !txtFiles.length}
+          disabled={txtUploading || !txtFiles.length || driveBlocked}
+          title={driveBlocked ? driveBlockedText : undefined}
         >
           {txtUploading ? 'Converting…' : `Convert & prepare downloads${txtFiles.length ? ` (${txtFiles.length} file(s))` : ''}`}
         </button>

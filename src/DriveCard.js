@@ -17,8 +17,12 @@ const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
  *
  * Once connected, every generated resume, cover letter and job description is
  * mirrored to ResumeUpdater/<date>/<profile>/<Company_Role>/ in their Drive.
+ *
+ * Connecting is a precondition for generating anything: the backend rejects every
+ * generate call until it is done. `onStatusChange` reports the status up so the
+ * page can disable its Generate buttons instead of letting the call fail.
  */
-function DriveCard() {
+function DriveCard({ onStatusChange }) {
   const [status, setStatus] = useState({ connected: false, configured: true });
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState({ type: '', text: '' });
@@ -27,10 +31,11 @@ function DriveCard() {
     try {
       const res = await axios.get(`${API_BASE_URL}/api/drive/status`);
       setStatus(res.data);
+      if (onStatusChange) onStatusChange(res.data);
     } catch {
       // Non-fatal: leave the card in its default state rather than blocking the page.
     }
-  }, []);
+  }, [onStatusChange]);
 
   useEffect(() => {
     loadStatus();
@@ -75,15 +80,17 @@ function DriveCard() {
       <p className="section-desc">
         Save every generated resume, cover letter and job description to your own Google Drive, in the same
         structure we use on the server: <code>ResumeUpdater/[date]/[profile]/[Company]_[Role]/</code>. We only
-        get access to the files this app creates — not the rest of your Drive.
+        get access to the files this app creates — not the rest of your Drive.{' '}
+        <strong>Drive must be connected before you can generate anything.</strong>
       </p>
 
       {message.text && <div className={`alert alert-${message.type}`}>{message.text}</div>}
 
       {!status.configured ? (
-        <div className="alert alert-info">
-          Google Drive isn’t configured on the server. An admin needs to set <code>GOOGLE_CLIENT_SECRET</code> in{' '}
-          <code>backend/.env</code> and enable the Google Drive API for the OAuth client.
+        <div className="alert alert-error">
+          Google Drive isn’t configured on the server, so nothing can be generated. An admin needs to set{' '}
+          <code>GOOGLE_CLIENT_SECRET</code> in <code>backend/.env</code> and enable the Google Drive API for the
+          OAuth client.
         </div>
       ) : status.connected ? (
         <div className="drive-status">
@@ -93,12 +100,17 @@ function DriveCard() {
           </button>
         </div>
       ) : (
-        <div className="drive-status">
-          <span className="badge badge-builtin">Not connected</span>
-          <button type="button" className="btn btn-primary btn-sm" onClick={() => connect()} disabled={busy}>
-            {busy ? 'Connecting…' : 'Connect Google Drive'}
-          </button>
-        </div>
+        <>
+          <div className="alert alert-error">
+            Google Drive is not connected. Connect it to enable resume generation.
+          </div>
+          <div className="drive-status">
+            <span className="badge badge-builtin">Not connected</span>
+            <button type="button" className="btn btn-primary btn-sm" onClick={() => connect()} disabled={busy}>
+              {busy ? 'Connecting…' : 'Connect Google Drive'}
+            </button>
+          </div>
+        </>
       )}
     </div>
   );
