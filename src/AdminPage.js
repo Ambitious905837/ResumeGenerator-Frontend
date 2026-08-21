@@ -6,6 +6,7 @@ import LogsPanel from './LogsPanel';
 // Rows shown per page in the raw usage log. The aggregates above it always cover the
 // whole filtered set — only this table is paged.
 const LOG_PAGE_SIZE = 25;
+const USER_PAGE_SIZE = 20;
 
 const EMPTY_FILTERS = {
   group_by: 'day',
@@ -450,7 +451,14 @@ function AdminPage() {
   const [view, setView] = useState('users');
 
   // --- Users / roles ---
+  // A page at a time, filtered by the server: the panel opens at the same speed with
+  // five users as with five thousand, and never holds the whole directory in the tab.
   const [users, setUsers] = useState([]);
+  const [userTotal, setUserTotal] = useState(0);
+  const [userTotalUnfiltered, setUserTotalUnfiltered] = useState(0);
+  const [userPage, setUserPage] = useState(0);
+  const [userSearchInput, setUserSearchInput] = useState('');
+  const [userSearch, setUserSearch] = useState('');
   const [usersLoading, setUsersLoading] = useState(false);
   const [message, setMessage] = useState({ type: '', text: '' });
   const [savingSub, setSavingSub] = useState(null);
@@ -628,17 +636,31 @@ function AdminPage() {
     }
   };
 
-  const loadUsers = async () => {
+  const loadUsers = useCallback(async () => {
     setUsersLoading(true);
     try {
-      const res = await axios.get(`${API_BASE_URL}/api/admin/users`);
+      const params = { limit: USER_PAGE_SIZE, offset: userPage * USER_PAGE_SIZE };
+      if (userSearch) params.search = userSearch;
+      const res = await axios.get(`${API_BASE_URL}/api/admin/users`, { params });
       setUsers(res.data.users || []);
+      setUserTotal(res.data.total || 0);
+      setUserTotalUnfiltered(res.data.total_unfiltered || 0);
     } catch (err) {
       setMessage({ type: 'error', text: err.response?.data?.detail || 'Failed to load users.' });
     } finally {
       setUsersLoading(false);
     }
-  };
+  }, [userPage, userSearch]);
+
+  // A request per keystroke would be one per letter of an email address.
+  useEffect(() => {
+    if (userSearchInput === userSearch) return undefined;
+    const timer = setTimeout(() => {
+      setUserSearch(userSearchInput);
+      setUserPage(0);
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [userSearchInput, userSearch]);
 
   // As an admin, /api/profiles returns every profile — the full menu to assign from.
   const loadAllProfiles = async () => {
@@ -655,9 +677,14 @@ function AdminPage() {
   useEffect(() => {
     loadKeys();
     loadSpend();
-    loadUsers();
     loadAllProfiles();
   }, []);
+
+  // Users reload whenever their page or search changes; firing it above too would just
+  // double the first request.
+  useEffect(() => {
+    loadUsers();
+  }, [loadUsers]);
 
   const openAssign = (target) => {
     setEditingSub(target.sub);
@@ -1091,12 +1118,37 @@ function AdminPage() {
         </p>
         {message.text && <div className={`alert alert-${message.type}`}>{message.text}</div>}
 
-        <button type="button" className="btn btn-secondary btn-sm" onClick={loadUsers} disabled={usersLoading}>
-          {usersLoading ? 'Loading…' : 'Refresh users'}
-        </button>
+        <div className="history-toolbar">
+          <button type="button" className="btn btn-secondary btn-sm" onClick={loadUsers} disabled={usersLoading}>
+            {usersLoading ? 'Loading…' : 'Refresh users'}
+          </button>
+          {/* Searches every user, not the page on screen. */}
+          <input
+            type="search"
+            className="history-search-input"
+            placeholder="Search name or email"
+            value={userSearchInput}
+            onChange={(e) => setUserSearchInput(e.target.value)}
+          />
+          {userSearchInput && (
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => { setUserSearchInput(''); setUserSearch(''); setUserPage(0); }}
+            >
+              Clear
+            </button>
+          )}
+        </div>
 
         {users.length === 0 ? (
-          <p className="muted">{usersLoading ? 'Loading users…' : 'No users yet.'}</p>
+          <p className="muted">
+            {usersLoading
+              ? 'Loading users…'
+              : userTotalUnfiltered === 0
+                ? 'No users yet.'
+                : 'No users match that search.'}
+          </p>
         ) : (
           <div className="history-table-wrapper">
             <table className="history-table">
@@ -1224,6 +1276,30 @@ function AdminPage() {
                 })}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {userTotal > USER_PAGE_SIZE && (
+          <div className="log-pager">
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              disabled={userPage === 0 || usersLoading}
+              onClick={() => setUserPage((p) => Math.max(0, p - 1))}
+            >
+              Previous
+            </button>
+            <span className="muted small">
+              Page {userPage + 1} of {Math.ceil(userTotal / USER_PAGE_SIZE)} ({userTotal} users)
+            </span>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              disabled={(userPage + 1) * USER_PAGE_SIZE >= userTotal || usersLoading}
+              onClick={() => setUserPage((p) => p + 1)}
+            >
+              Next
+            </button>
           </div>
         )}
       </div>

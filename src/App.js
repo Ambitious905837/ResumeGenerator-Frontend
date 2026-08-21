@@ -114,75 +114,87 @@ function App() {
   // Generated resumes — the single table of everything ever generated for this profile,
   // by anyone using it, and the only place files are downloaded from. Rows carry Drive
   // file ids, so this works for resumes generated weeks ago, not just this session's.
-  const [history, setHistory] = useState({ file_path: '', history: [], count: 0 });
+  const [history, setHistory] = useState({
+    file_path: '',
+    // Only the rows of the page on screen. The filters, the ordering and the paging all
+    // happen on the server now — a profile with thousands of generations would otherwise
+    // ship (and re-parse) the lot on every page load, which is what made this slow.
+    history: [],
+    count: 0,
+    total: 0,
+    downloadable: 0,
+    total_unfiltered: 0,
+  });
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyPage, setHistoryPage] = useState(1);
   const [historyPageInput, setHistoryPageInput] = useState('1');
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+  // What the box shows vs. what the server has been asked for. Typing shouldn't fire a
+  // request per keystroke, so the committed term trails the input by a short pause.
+  const [searchInput, setSearchInput] = useState('');
+  const [search, setSearch] = useState('');
   const [downloadingHistory, setDownloadingHistory] = useState(false);
   const HISTORY_PAGE_SIZE = 10;
+
+  useEffect(() => {
+    if (searchInput === search) return undefined;
+    const timer = setTimeout(() => {
+      setSearch(searchInput);
+      setHistoryPage(1);
+      setSelectedIds(new Set());
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [searchInput, search]);
 
   const loadCompanyRolesHistory = useCallback(async () => {
     setHistoryLoading(true);
     try {
-      const params = candidateName && candidateName.trim() ? { candidate_name: candidateName.trim() } : {};
+      const params = { limit: HISTORY_PAGE_SIZE, offset: (historyPage - 1) * HISTORY_PAGE_SIZE };
+      if (candidateName && candidateName.trim()) params.candidate_name = candidateName.trim();
+      if (dateFrom) params.date_from = dateFrom;
+      if (dateTo) params.date_to = dateTo;
+      if (search) params.search = search;
       const res = await axios.get(`${API_BASE_URL}/api/company-roles-history`, { params });
       setHistory({
         file_path: res.data.file_path || '',
         history: res.data.history || [],
         count: res.data.count || 0,
+        total: res.data.total || 0,
+        downloadable: res.data.downloadable || 0,
+        total_unfiltered: res.data.total_unfiltered || 0,
       });
     } catch (err) {
-      setHistory({ file_path: '', history: [], count: 0 });
+      setHistory({ file_path: '', history: [], count: 0, total: 0, downloadable: 0, total_unfiltered: 0 });
     } finally {
       setHistoryLoading(false);
     }
-  }, [candidateName]);
+  }, [candidateName, historyPage, dateFrom, dateTo, search]);
 
   useEffect(() => {
     loadCompanyRolesHistory();
   }, [loadCompanyRolesHistory]);
 
+  // Switching profile shows a different history entirely, so neither the page number nor
+  // the ticked rows carry over. Guarded so it costs nothing when they are already clear —
+  // otherwise this fires on the initial profile load and doubles the first fetch.
   useEffect(() => {
-    setHistoryPage(1);
-    setHistoryPageInput('1');
-  }, [history.history.length]);
+    setHistoryPage((p) => (p === 1 ? p : 1));
+    setSelectedIds((prev) => (prev.size === 0 ? prev : new Set()));
+  }, [candidateName]);
 
   useEffect(() => { setHistoryPageInput(String(historyPage)); }, [historyPage]);
 
-  // Newest first: the resume you just generated is the one you most likely want.
-  // The sheet appends, so its natural order is oldest first.
-  const historyRows = (history.history || []).slice().reverse();
-  const historyFiltered = historyRows.filter((r) => {
-    const day = (r.date || '').slice(0, 10);
-    if (dateFrom && day < dateFrom) return false;
-    if (dateTo && day > dateTo) return false;
-    return true;
-  });
+  // Already newest-first and already the right page — the server did both.
+  const historyPageRows = history.history || [];
+  const historyTotalPages = Math.max(1, Math.ceil(history.total / HISTORY_PAGE_SIZE));
 
   // Rows generated before file history existed, or while Drive was disconnected, have
   // no file ids — nothing to download, so they can't be selected either.
-  const selectableIds = historyFiltered.filter((r) => r.downloadable).map((r) => r.id);
+  const pageSelectableIds = historyPageRows.filter((r) => r.downloadable).map((r) => r.id);
   const selectedCount = selectedIds.size;
-  const allSelected = selectableIds.length > 0 && selectableIds.every((id) => selectedIds.has(id));
-
-  // Selection means "selected among what you can currently see". Narrowing the date
-  // range therefore drops rows that scrolled out of the filter, so the count on the
-  // Download button always matches the rows on screen.
-  useEffect(() => {
-    setSelectedIds((prev) => {
-      const allowed = new Set(selectableIds);
-      const next = new Set([...prev].filter((id) => allowed.has(id)));
-      return next.size === prev.size ? prev : next;
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dateFrom, dateTo, history.history]);
-
-  const historyTotalPages = Math.max(1, Math.ceil(historyFiltered.length / HISTORY_PAGE_SIZE));
-  const historyStart = (Math.min(historyPage, historyTotalPages) - 1) * HISTORY_PAGE_SIZE;
-  const historyPageRows = historyFiltered.slice(historyStart, historyStart + HISTORY_PAGE_SIZE);
+  const allSelected = pageSelectableIds.length > 0 && pageSelectableIds.every((id) => selectedIds.has(id));
 
   const toggleRow = (id) => {
     setSelectedIds((prev) => {
@@ -193,19 +205,52 @@ function App() {
     });
   };
 
-  /** Header checkbox: selects every downloadable row matching the filter, not just this page. */
+  /**
+   * Header checkbox: every downloadable row on this page.
+   *
+   * It used to mean "every row matching the filter", which it could only do because the
+   * browser held them all. Ticks still survive paging — selection is a set of ids, not a
+   * slice — and taking the whole filtered set is what the Download-all button is for; it
+   * sends the filter rather than the ids, so the server never has to name them.
+   */
   const toggleSelectAll = () => {
-    setSelectedIds(allSelected ? new Set() : new Set(selectableIds));
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (allSelected) pageSelectableIds.forEach((id) => next.delete(id));
+      else pageSelectableIds.forEach((id) => next.add(id));
+      return next;
+    });
   };
 
-  const clearDateFilter = () => {
-    setDateFrom('');
-    setDateTo('');
+  /**
+   * Reload after a generation, back at page one.
+   *
+   * The new rows are the newest ones, so they are on the first page — which is not
+   * where the user necessarily is. Page one re-fetches by itself through the loader's
+   * dependencies; already being there is the case that needs asking explicitly.
+   */
+  const refreshHistoryToTop = () => {
+    if (historyPage === 1) loadCompanyRolesHistory();
+    else setHistoryPage(1);
   };
 
   useEffect(() => {
+    if (!historyLoading && historyPage > historyTotalPages) setHistoryPage(historyTotalPages);
+  }, [historyLoading, historyPage, historyTotalPages]);
+
+  /** Any filter change restarts at page one with nothing ticked. */
+  const applyDateFilter = (from, to) => {
+    setDateFrom(from);
+    setDateTo(to);
     setHistoryPage(1);
-  }, [dateFrom, dateTo]);
+    setSelectedIds(new Set());
+  };
+
+  const clearHistoryFilters = () => {
+    setSearchInput('');
+    setSearch('');
+    applyDateFilter('', '');
+  };
 
   useEffect(() => {
     axios
@@ -340,7 +385,7 @@ function App() {
       setResults(resultList);
       setProgress({ current: total, total, status: '' });
       const successCount = resultList.filter((r) => r.success).length;
-      if (successCount > 0) loadCompanyRolesHistory();
+      if (successCount > 0) refreshHistoryToTop();
       setMessage({
         type: successCount === total ? 'success' : successCount > 0 ? 'info' : 'error',
         text: `Done. ${successCount} of ${total} resume(s) and cover letter(s) generated — find them in Generated resumes below.`,
@@ -402,13 +447,19 @@ function App() {
   const downloadSelected = () =>
     downloadHistory({ ids: [...selectedIds] }, `resumes_${selectedIds.size}_selected.zip`);
 
-  /** Everything the date filter currently shows — or the whole history when it's empty. */
+  /**
+   * Everything the filter currently shows — or the whole history when there is no filter.
+   *
+   * The filter travels to the server rather than a list of row ids, so this still means
+   * "all of it" when the browser is only holding ten rows of it.
+   */
   const downloadFiltered = () => {
     const body = {};
     if (dateFrom) body.date_from = dateFrom;
     if (dateTo) body.date_to = dateTo;
+    if (search) body.search = search;
     const name =
-      dateFrom && dateTo ? `resumes_${dateFrom}_to_${dateTo}.zip` : `resumes_${selectableIds.length}_selected.zip`;
+      dateFrom && dateTo ? `resumes_${dateFrom}_to_${dateTo}.zip` : `resumes_${history.downloadable}_selected.zip`;
     return downloadHistory(body, name);
   };
 
@@ -544,7 +595,7 @@ function App() {
     setJdProgress({ current: total, total, status: '' });
     setJdResults(resultList);
     const successCount = resultList.filter((r) => r.success).length;
-    if (successCount > 0) loadCompanyRolesHistory();
+    if (successCount > 0) refreshHistoryToTop();
     setJdMessage({
       type: successCount === total ? 'success' : successCount > 0 ? 'info' : 'error',
       text: `Done. ${successCount} of ${total} generated — find them in Generated resumes above.`,
@@ -595,219 +646,229 @@ function App() {
           assigned it, so you can see what has already been applied for. Tick the ones you want
           and download them as a ZIP, including resumes from earlier sessions.
         </p>
-        {historyLoading ? (
+        {/* The toolbar stays mounted through a fetch. Every page turn and every keystroke
+            in the search box is a request now, and unmounting this would take the caret
+            out of the box mid-word. Only the rows below swap for a loading line. */}
+        <div className="history-toolbar">
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={loadCompanyRolesHistory}
+            disabled={historyLoading}
+          >
+            Refresh
+          </button>
+
+          <label className="history-date-label">
+            From
+            <input
+              type="date"
+              className="history-date-input"
+              value={dateFrom}
+              max={dateTo || undefined}
+              onChange={(e) => applyDateFilter(e.target.value, dateTo)}
+            />
+          </label>
+          <label className="history-date-label">
+            To
+            <input
+              type="date"
+              className="history-date-input"
+              value={dateTo}
+              min={dateFrom || undefined}
+              onChange={(e) => applyDateFilter(dateFrom, e.target.value)}
+            />
+          </label>
+          {/* Searching the whole history, not the page on screen — the server matches
+              company, role and job URL across every row of the profile. */}
+          <input
+            type="search"
+            className="history-search-input"
+            placeholder="Search company, role or URL"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+          />
+          {(dateFrom || dateTo || searchInput) && (
+            <button type="button" className="btn btn-secondary btn-sm" onClick={clearHistoryFilters}>
+              Clear filters
+            </button>
+          )}
+
+          <span className="history-toolbar-spacer" />
+
+          <button
+            type="button"
+            className="btn btn-success btn-sm"
+            onClick={downloadSelected}
+            disabled={downloadingHistory || selectedCount === 0}
+            title="ZIP the ticked resumes, one folder each"
+          >
+            {downloadingHistory ? 'Preparing ZIP…' : `Download selected (${selectedCount})`}
+          </button>
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            onClick={downloadFiltered}
+            disabled={downloadingHistory || history.downloadable === 0}
+            title={
+              dateFrom || dateTo || search
+                ? 'ZIP every downloadable resume matching the current filter'
+                : 'ZIP every downloadable resume in the history'
+            }
+          >
+            {dateFrom || dateTo || search
+              ? `Download filtered (${history.downloadable})`
+              : `Download all (${history.downloadable})`}
+          </button>
+        </div>
+
+        {historyLoading && historyPageRows.length === 0 ? (
           <p className="muted">Loading…</p>
+        ) : history.total === 0 ? (
+          <p className="muted">
+            {history.total_unfiltered === 0
+              ? 'Nothing generated yet. Generate a resume from a job link to add one.'
+              : 'No resumes match that filter.'}
+          </p>
         ) : (
           <>
-            <div className="history-toolbar">
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={loadCompanyRolesHistory}
-                disabled={historyLoading}
-              >
-                Refresh
-              </button>
-
-              <label className="history-date-label">
-                From
-                <input
-                  type="date"
-                  className="history-date-input"
-                  value={dateFrom}
-                  max={dateTo || undefined}
-                  onChange={(e) => setDateFrom(e.target.value)}
-                />
-              </label>
-              <label className="history-date-label">
-                To
-                <input
-                  type="date"
-                  className="history-date-input"
-                  value={dateTo}
-                  min={dateFrom || undefined}
-                  onChange={(e) => setDateTo(e.target.value)}
-                />
-              </label>
-              {(dateFrom || dateTo) && (
-                <button type="button" className="btn btn-secondary btn-sm" onClick={clearDateFilter}>
-                  Clear dates
-                </button>
-              )}
-
-              <span className="history-toolbar-spacer" />
-
-              <button
-                type="button"
-                className="btn btn-success btn-sm"
-                onClick={downloadSelected}
-                disabled={downloadingHistory || selectedCount === 0}
-                title="ZIP the ticked resumes, one folder each"
-              >
-                {downloadingHistory ? 'Preparing ZIP…' : `Download selected (${selectedCount})`}
-              </button>
-              <button
-                type="button"
-                className="btn btn-primary btn-sm"
-                onClick={downloadFiltered}
-                disabled={downloadingHistory || selectableIds.length === 0}
-                title={
-                  dateFrom || dateTo
-                    ? 'ZIP every downloadable resume in the chosen date range'
-                    : 'ZIP every downloadable resume in the history'
-                }
-              >
-                {dateFrom || dateTo
-                  ? `Download date range (${selectableIds.length})`
-                  : `Download all (${selectableIds.length})`}
-              </button>
-            </div>
-
-            {historyFiltered.length === 0 ? (
-              <p className="muted">
-                {history.history.length === 0
-                  ? 'Nothing generated yet. Generate a resume from a job link to add one.'
-                  : 'No resumes in that date range.'}
-              </p>
-            ) : (
-              <>
-                <div className="history-table-wrapper">
-                  <table className="history-table">
-                    <thead>
-                      <tr>
-                        <th className="history-check-col">
-                          <input
-                            type="checkbox"
-                            checked={allSelected}
-                            onChange={toggleSelectAll}
-                            disabled={selectableIds.length === 0}
-                            title="Select every downloadable resume matching the current filter"
-                          />
-                        </th>
-                        <th>Date</th>
-                        <th>Company</th>
-                        <th>Role</th>
-                        <th>Job URL</th>
-                        <th>Generated by</th>
-                        <th>Files</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {historyPageRows.map((row) => (
-                        <tr
-                          key={row.id}
-                          className={selectedIds.has(row.id) ? 'history-row-selected' : undefined}
-                        >
-                          <td className="history-check-col">
-                            <input
-                              type="checkbox"
-                              checked={selectedIds.has(row.id)}
-                              disabled={!row.downloadable}
-                              onChange={() => toggleRow(row.id)}
-                              title={
-                                row.downloadable
-                                  ? 'Include in download'
-                                  : 'No files stored for this one — it can only be regenerated'
-                              }
-                            />
-                          </td>
-                          <td>{(row.date || '').slice(0, 10)}</td>
-                          <td>{row.company}</td>
-                          <td>{row.role}</td>
-                          <td>
-                            {row.url ? (
-                              <a href={row.url} target="_blank" rel="noopener noreferrer">
-                                {row.url.length > 50 ? `${row.url.slice(0, 50)}…` : row.url}
-                              </a>
-                            ) : (
-                              <span className="muted">—</span>
-                            )}
-                          </td>
-                          <td>
-                            {row.mine ? (
-                              <span title="Generated by you">You</span>
-                            ) : (
-                              <span className="muted" title={row.owner_email || 'Generated by another user of this profile'}>
-                                {row.owner_email || '—'}
-                              </span>
-                            )}
-                          </td>
-                          <td>
-                            {row.downloadable ? (
-                              // The Drive folder is in the generator's own account and is not
-                              // shared, so only link it for them. Everyone else downloads
-                              // through the ZIP button, which fetches with the owner's token.
-                              row.drive_folder_id && row.mine ? (
-                                <a
-                                  href={`https://drive.google.com/drive/folders/${row.drive_folder_id}`}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  title={row.files.map((f) => f.name).join(', ')}
-                                >
-                                  {row.files.length} file{row.files.length === 1 ? '' : 's'} ↗
-                                </a>
-                              ) : (
-                                <span title={row.files.map((f) => f.name).join(', ')}>
-                                  {row.files.length}
-                                </span>
-                              )
-                            ) : (
-                              <span className="muted" title="Generated before files were kept, or while Drive was disconnected">
-                                Not stored
-                              </span>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                {historyTotalPages > 1 && (
-                  <div className="history-pagination">
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-sm"
-                      onClick={() => setHistoryPage((p) => Math.max(1, p - 1))}
-                      disabled={historyPage <= 1}
-                    >
-                      Previous
-                    </button>
-                    <span className="history-pagination-info">
-                      Page
+            {/* Rows already on screen stay put and just dim while the next page
+                arrives — the table doesn't collapse and reflow on every click. */}
+            <div className={`history-table-wrapper${historyLoading ? ' is-refreshing' : ''}`}>
+              <table className="history-table">
+                <thead>
+                  <tr>
+                    <th className="history-check-col">
                       <input
-                        type="number"
-                        className="pagination-page-input"
-                        min={1}
-                        max={historyTotalPages}
-                        value={historyPageInput}
-                        onChange={(e) => setHistoryPageInput(e.target.value)}
-                        onBlur={() => {
-                          const val = parseInt(historyPageInput, 10);
-                          if (!isNaN(val) && val >= 1 && val <= historyTotalPages) setHistoryPage(val);
-                          else setHistoryPageInput(String(historyPage));
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            const val = parseInt(historyPageInput, 10);
-                            if (!isNaN(val) && val >= 1 && val <= historyTotalPages) setHistoryPage(val);
-                            else setHistoryPageInput(String(historyPage));
-                            e.target.blur();
-                          }
-                        }}
+                        type="checkbox"
+                        checked={allSelected}
+                        onChange={toggleSelectAll}
+                        disabled={pageSelectableIds.length === 0}
+                        title="Select every downloadable resume on this page"
                       />
-                      of {historyTotalPages} ({historyFiltered.length} shown)
-                    </span>
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-sm"
-                      onClick={() => setHistoryPage((p) => Math.min(historyTotalPages, p + 1))}
-                      disabled={historyPage >= historyTotalPages}
+                    </th>
+                    <th>Date</th>
+                    <th>Company</th>
+                    <th>Role</th>
+                    <th>Job URL</th>
+                    <th>Generated by</th>
+                    <th>Files</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {historyPageRows.map((row) => (
+                    <tr
+                      key={row.id}
+                      className={selectedIds.has(row.id) ? 'history-row-selected' : undefined}
                     >
-                      Next
-                    </button>
-                  </div>
-                )}
-              </>
+                      <td className="history-check-col">
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.has(row.id)}
+                          disabled={!row.downloadable}
+                          onChange={() => toggleRow(row.id)}
+                          title={
+                            row.downloadable
+                              ? 'Include in download'
+                              : 'No files stored for this one — it can only be regenerated'
+                          }
+                        />
+                      </td>
+                      <td>{(row.date || '').slice(0, 10)}</td>
+                      <td>{row.company}</td>
+                      <td>{row.role}</td>
+                      <td>
+                        {row.url ? (
+                          <a href={row.url} target="_blank" rel="noopener noreferrer">
+                            {row.url.length > 50 ? `${row.url.slice(0, 50)}…` : row.url}
+                          </a>
+                        ) : (
+                          <span className="muted">—</span>
+                        )}
+                      </td>
+                      <td>
+                        {row.mine ? (
+                          <span title="Generated by you">You</span>
+                        ) : (
+                          <span className="muted" title={row.owner_email || 'Generated by another user of this profile'}>
+                            {row.owner_email || '—'}
+                          </span>
+                        )}
+                      </td>
+                      <td>
+                        {row.downloadable ? (
+                          // The Drive folder is in the generator's own account and is not
+                          // shared, so only link it for them. Everyone else downloads
+                          // through the ZIP button, which fetches with the owner's token.
+                          row.drive_folder_id && row.mine ? (
+                            <a
+                              href={`https://drive.google.com/drive/folders/${row.drive_folder_id}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              title={row.files.map((f) => f.name).join(', ')}
+                            >
+                              {row.files.length} file{row.files.length === 1 ? '' : 's'} ↗
+                            </a>
+                          ) : (
+                            <span title={row.files.map((f) => f.name).join(', ')}>
+                              {row.files.length}
+                            </span>
+                          )
+                        ) : (
+                          <span className="muted" title="Generated before files were kept, or while Drive was disconnected">
+                            Not stored
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {historyTotalPages > 1 && (
+              <div className="history-pagination">
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => setHistoryPage((p) => Math.max(1, p - 1))}
+                  disabled={historyPage <= 1}
+                >
+                  Previous
+                </button>
+                <span className="history-pagination-info">
+                  Page
+                  <input
+                    type="number"
+                    className="pagination-page-input"
+                    min={1}
+                    max={historyTotalPages}
+                    value={historyPageInput}
+                    onChange={(e) => setHistoryPageInput(e.target.value)}
+                    onBlur={() => {
+                      const val = parseInt(historyPageInput, 10);
+                      if (!isNaN(val) && val >= 1 && val <= historyTotalPages) setHistoryPage(val);
+                      else setHistoryPageInput(String(historyPage));
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        const val = parseInt(historyPageInput, 10);
+                        if (!isNaN(val) && val >= 1 && val <= historyTotalPages) setHistoryPage(val);
+                        else setHistoryPageInput(String(historyPage));
+                        e.target.blur();
+                      }
+                    }}
+                  />
+                  of {historyTotalPages} ({history.total} total)
+                </span>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => setHistoryPage((p) => Math.min(historyTotalPages, p + 1))}
+                  disabled={historyPage >= historyTotalPages}
+                >
+                  Next
+                </button>
+              </div>
             )}
           </>
         )}

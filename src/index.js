@@ -1,14 +1,19 @@
-import React from 'react';
+import React, { Suspense, lazy } from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom';
 import { GoogleOAuthProvider } from '@react-oauth/google';
 import './index.css';
 import './App.css';
 import App from './App';
-import ProfilesPage from './ProfilesPage';
-import AdminPage from './AdminPage';
 import Login from './Login';
 import { AuthProvider, useAuth, GOOGLE_CLIENT_ID } from './auth';
+
+// Admin-only screens, fetched the first time one is opened rather than bundled into
+// the page everybody lands on. Between them they are most of the app's JavaScript, and
+// a regular user never has a route that reaches either — they were paying the download
+// and parse cost of code they are not allowed to run.
+const ProfilesPage = lazy(() => import('./ProfilesPage'));
+const AdminPage = lazy(() => import('./AdminPage'));
 
 function NavBar() {
   const { user, isAdmin, logout } = useAuth();
@@ -56,12 +61,14 @@ function AuthenticatedApp() {
   return (
     <BrowserRouter>
       <NavBar />
-      <Routes>
-        <Route path="/" element={<App />} />
-        {/* Profiles are shared and admin-managed; regular users only select them on the Generate page. */}
-        <Route path="/profiles" element={user.role === 'admin' ? <ProfilesPage /> : <Navigate to="/" replace />} />
-        <Route path="/admin" element={user.role === 'admin' ? <AdminPage /> : <Navigate to="/" replace />} />
-      </Routes>
+      <Suspense fallback={<div className="auth-loading">Loading…</div>}>
+        <Routes>
+          <Route path="/" element={<App />} />
+          {/* Profiles are shared and admin-managed; regular users only select them on the Generate page. */}
+          <Route path="/profiles" element={user.role === 'admin' ? <ProfilesPage /> : <Navigate to="/" replace />} />
+          <Route path="/admin" element={user.role === 'admin' ? <AdminPage /> : <Navigate to="/" replace />} />
+        </Routes>
+      </Suspense>
     </BrowserRouter>
   );
 }
