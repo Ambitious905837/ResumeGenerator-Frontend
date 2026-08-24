@@ -3,12 +3,42 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#000000" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0d1117" media="(prefers-color-scheme: dark)" />
     <meta
       name="description"
       content="Resume Updater - Generate tailored resumes and cover letters"
     />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
     <title>Resume Updater</title>
+    <script>
+      /*
+       * Apply the saved theme before the first paint.
+       *
+       * React cannot do this: by the time the bundle has parsed and mounted, a dark-mode
+       * user has already been shown a full white page. This is deliberately inline and
+       * render-blocking — it is a few lines, and the flash is the thing being prevented.
+       */
+      (function () {
+        try {
+          var stored = localStorage.getItem('ru_theme');
+          var dark =
+            stored === 'dark' ||
+            ((stored === 'system' || !stored) &&
+              window.matchMedia('(prefers-color-scheme: dark)').matches);
+          if (dark) document.documentElement.classList.add('dark');
+          document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
+        } catch (e) {
+          /* Site data blocked — the app falls back to the light theme. */
+        }
+      })();
+    </script>
   </head>
   <body>
     <noscript>You need to enable JavaScript to run this app.</noscript>

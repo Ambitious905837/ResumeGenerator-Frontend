@@ -1,187 +1,202 @@
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Design tokens.
+ *
+ * Every colour the app uses is declared here twice — once for light, once for dark —
+ * as bare HSL channels so Tailwind can apply opacity modifiers (`bg-brand/10`).
+ * Components never hardcode a hex value; they reference a token, which is what makes
+ * the theme toggle a one-class change on <html> rather than a per-component concern.
+ *
+ * Naming: `brand.fg` is the text colour that sits ON a solid brand fill (white-ish).
+ * For the status hues, `.fg` is instead the deep, readable tone used for text on that
+ * hue's `.soft` background — status colours are used far more often as tinted panels
+ * than as solid fills.
+ */
+@layer base {
+  :root {
+    --bg: 220 20% 97%;
+    --surface: 0 0% 100%;
+    --surface-2: 220 24% 98%;
+    --overlay: 0 0% 100%;
+
+    --border: 220 16% 90%;
+    --border-strong: 220 13% 82%;
+    --input: 220 16% 87%;
+    --ring: 243 75% 59%;
+
+    --fg: 222 32% 12%;
+    --muted: 220 10% 42%;
+    --subtle: 220 9% 58%;
+
+    --brand: 243 75% 59%;
+    --brand-hover: 244 70% 51%;
+    --brand-fg: 0 0% 100%;
+    --brand-soft: 243 92% 96%;
+
+    --success: 158 72% 32%;
+    --success-fg: 158 76% 22%;
+    --success-soft: 152 66% 94%;
+
+    --warning: 32 88% 44%;
+    --warning-fg: 28 80% 29%;
+    --warning-soft: 43 96% 93%;
+
+    --danger: 0 72% 48%;
+    --danger-fg: 0 66% 36%;
+    --danger-soft: 0 86% 96%;
+
+    --info: 205 85% 40%;
+    --info-fg: 205 88% 26%;
+    --info-soft: 204 94% 94%;
+
+    --shadow: 220 45% 20%;
+  }
+
+  .dark {
+    --bg: 224 32% 7%;
+    --surface: 224 26% 10%;
+    --surface-2: 224 22% 13%;
+    --overlay: 224 26% 12%;
+
+    --border: 222 18% 20%;
+    --border-strong: 222 15% 29%;
+    --input: 222 18% 23%;
+    --ring: 243 80% 68%;
+
+    --fg: 220 26% 96%;
+    --muted: 220 12% 66%;
+    --subtle: 220 10% 52%;
+
+    --brand: 243 80% 67%;
+    --brand-hover: 243 85% 74%;
+    --brand-fg: 224 42% 9%;
+    --brand-soft: 243 42% 19%;
+
+    --success: 156 58% 46%;
+    --success-fg: 156 58% 70%;
+    --success-soft: 158 42% 15%;
+
+    --warning: 38 88% 58%;
+    --warning-fg: 38 90% 72%;
+    --warning-soft: 36 44% 16%;
+
+    --danger: 0 74% 62%;
+    --danger-fg: 0 82% 78%;
+    --danger-soft: 0 44% 18%;
+
+    --info: 205 85% 60%;
+    --info-fg: 205 88% 76%;
+    --info-soft: 205 48% 16%;
+
+    --shadow: 224 70% 2%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html {
+    /* Anchor jumps and "back to top" shouldn't teleport, but a user who has asked the
+       OS for less motion gets none of it — see the reduced-motion block below. */
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-bg text-fg antialiased;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+    text-rendering: optimizeLegibility;
+  }
+
+  /* One ring definition for the whole app: every interactive element inherits the same
+     visible keyboard focus, and none of them show it on a plain mouse click. */
+  :focus-visible {
+    @apply outline-none ring-2 ring-ring/70 ring-offset-2 ring-offset-bg;
+  }
+
+  ::selection {
+    @apply bg-brand/25;
+  }
+
+  /*
+   * Inline code is where the long unbreakable strings live — Drive paths, env var
+   * names, masked keys. Without this they set the page's minimum width and the whole
+   * layout scrolls sideways on a phone, which is the one thing a responsive layout
+   * must never do.
+   */
+  code {
+    overflow-wrap: anywhere;
+  }
+
+  /* Date inputs render a near-invisible black calendar glyph on a dark field, so the
+     one piece of browser chrome we cannot restyle at least gets inverted. */
+  .dark input[type='date']::-webkit-calendar-picker-indicator,
+  .dark input[type='time']::-webkit-calendar-picker-indicator {
+    filter: invert(1) opacity(0.65);
+  }
+
+  input[type='search']::-webkit-search-cancel-button {
+    -webkit-appearance: none;
+  }
+
+  /* Scrollbars: the default light-grey ones sit badly on dark surfaces. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--border-strong)) transparent;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply rounded-full border-[3px] border-solid border-transparent bg-border-strong bg-clip-content;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-subtle bg-clip-content;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
 }
 
-body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  background-color: #f5f5f5;
-}
+@layer components {
+  /* A single place for "this element is a text field", so an input, a textarea, a
+     native select and a date picker are visually the same control. */
+  .field-base {
+    @apply w-full rounded-lg border border-input bg-surface px-3 py-2 text-sm text-fg
+           shadow-xs transition-colors placeholder:text-subtle
+           hover:border-border-strong
+           focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/25
+           disabled:cursor-not-allowed disabled:bg-surface-2 disabled:text-subtle;
+  }
 
-code {
-  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
-    monospace;
-}
+  /* Loading placeholder with a light sweep across it, rather than a bare pulse. */
+  .skeleton {
+    @apply relative overflow-hidden rounded-md bg-surface-2;
+  }
 
-.container {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 20px;
-}
-
-.card {
-  background: white;
-  border-radius: 8px;
-  padding: 24px;
-  margin-bottom: 24px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-}
-
-.card h2 {
-  margin-bottom: 16px;
-  color: #333;
-  font-size: 24px;
-}
-
-.form-group {
-  margin-bottom: 16px;
-}
-
-.form-group label {
-  display: block;
-  margin-bottom: 8px;
-  font-weight: 500;
-  color: #555;
-}
-
-.form-group input,
-.form-group textarea {
-  width: 100%;
-  padding: 10px;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  font-size: 14px;
-}
-
-.form-group textarea {
-  min-height: 100px;
-  resize: vertical;
-}
-
-.btn {
-  padding: 10px 20px;
-  border: none;
-  border-radius: 4px;
-  font-size: 14px;
-  cursor: pointer;
-  transition: background-color 0.3s;
-}
-
-.btn-primary {
-  background-color: #007bff;
-  color: white;
-}
-
-.btn-primary:hover {
-  background-color: #0056b3;
-}
-
-.btn-success {
-  background-color: #28a745;
-  color: white;
-}
-
-.btn-success:hover {
-  background-color: #218838;
-}
-
-.btn-secondary {
-  background-color: #6c757d;
-  color: white;
-}
-
-.btn-secondary:hover {
-  background-color: #5a6268;
-}
-
-.btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.job-list {
-  list-style: none;
-  padding: 0;
-}
-
-.job-item {
-  padding: 12px;
-  margin-bottom: 8px;
-  background-color: #f8f9fa;
-  border-radius: 4px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.job-item a {
-  color: #007bff;
-  text-decoration: none;
-  word-break: break-all;
-}
-
-.job-item a:hover {
-  text-decoration: underline;
-}
-
-.alert {
-  padding: 12px;
-  border-radius: 4px;
-  margin-bottom: 16px;
-}
-
-.alert-success {
-  background-color: #d4edda;
-  color: #155724;
-  border: 1px solid #c3e6cb;
-}
-
-.alert-error {
-  background-color: #f8d7da;
-  color: #721c24;
-  border: 1px solid #f5c6cb;
-}
-
-.alert-info {
-  background-color: #d1ecf1;
-  color: #0c5460;
-  border: 1px solid #bee5eb;
-}
-
-.loading {
-  text-align: center;
-  padding: 20px;
-  color: #666;
-}
-
-.section-title {
-  font-size: 20px;
-  margin-top: 24px;
-  margin-bottom: 16px;
-  color: #333;
-  border-bottom: 2px solid #007bff;
-  padding-bottom: 8px;
-}
-
-.dynamic-list {
-  margin-bottom: 16px;
-}
-
-.dynamic-list-item {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-
-.dynamic-list-item input {
-  flex: 1;
-}
-
-.dynamic-list-item button {
-  padding: 8px 12px;
+  .skeleton::after {
+    @apply absolute inset-0 -translate-x-full animate-shimmer bg-gradient-to-r
+           from-transparent via-fg/[0.06] to-transparent;
+    content: '';
+  }
 }
