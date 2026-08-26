@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
 import {
   AlertTriangle,
+  CopyCheck,
   Download,
   ExternalLink,
   FileDown,
@@ -20,6 +21,8 @@ import { cn } from '../lib/cn';
 import type {
   DriveOutcome,
   DriveStatus,
+  DuplicateCheck,
+  DuplicateUrl,
   GenerationResult,
   JobDescriptionListing,
   JobDescriptionResult,
@@ -34,10 +37,12 @@ import { Alert } from '../components/ui/alert';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import { Card, CardBody, CardHeader, SectionHeading } from '../components/ui/card';
+import { CheckboxField } from '../components/ui/checkbox';
 import { Dropzone } from '../components/ui/dropzone';
 import { Field, Select, Textarea } from '../components/ui/field';
 import { ProgressBar } from '../components/ui/feedback';
 import { HintWrap } from '../components/ui/tooltip';
+import { useDebouncedValue } from '../hooks/useDebouncedValue';
 
 interface Progress {
   current: number;
@@ -91,7 +96,9 @@ function GenerationFailures<T extends GenerationResult>({
   results: T[];
   label: (result: T) => string;
 }) {
-  const failed = results.filter((r) => !r.success);
+  // A skipped duplicate is not a failure — it has its own list below, in a colour
+  // that doesn't ask the user to go and fix something.
+  const failed = results.filter((r) => !r.success && !r.skipped);
   if (failed.length === 0) return null;
   return (
     <div className="space-y-2">
@@ -116,6 +123,58 @@ function GenerationFailures<T extends GenerationResult>({
   );
 }
 
+/**
+ * The jobs the last run deliberately did not generate, because this profile had
+ * already generated from that URL recently.
+ *
+ * Listed rather than counted: the user pasted these links expecting resumes, so
+ * "skipped 12" without saying which twelve reads as work quietly going missing.
+ */
+function GenerationSkips<T extends GenerationResult>({
+  results,
+  label,
+  allowDuplicates,
+  onAllowDuplicates,
+}: {
+  results: T[];
+  label: (result: T) => string;
+  /** Pass both to offer the override here. The job-links column offers it in the
+      warning above the button instead, before anything has been skipped. */
+  allowDuplicates?: boolean;
+  onAllowDuplicates?: (allow: boolean) => void;
+}) {
+  const skipped = results.filter((r) => r.skipped);
+  if (skipped.length === 0) return null;
+  return (
+    <div className="space-y-2">
+      <SectionHeading className="mb-0">
+        <span className="inline-flex items-center gap-1.5 text-warning-fg">
+          <CopyCheck className="h-3.5 w-3.5" aria-hidden="true" />
+          Skipped as already generated ({skipped.length})
+        </span>
+      </SectionHeading>
+      <ul className="space-y-1.5">
+        {skipped.map((result, i) => (
+          <li
+            key={i}
+            className="rounded-lg border border-warning/25 bg-warning-soft px-3 py-2 text-sm"
+          >
+            <div className="break-all font-medium text-warning-fg">{label(result)}</div>
+            <div className="mt-0.5 text-xs leading-relaxed text-warning-fg/80">
+              {result.duplicate?.reason || result.error}
+            </div>
+          </li>
+        ))}
+      </ul>
+      {onAllowDuplicates && (
+        <CheckboxField checked={!!allowDuplicates} onCheckedChange={onAllowDuplicates}>
+          Generate them anyway, then run it again
+        </CheckboxField>
+      )}
+    </div>
+  );
+}
+
 export default function GeneratePage() {
   // --- Profiles -------------------------------------------------------------
   // Profiles come from the server and are per-user: an admin decides which candidate
@@ -134,6 +193,10 @@ export default function GeneratePage() {
   // they land in the history table above, which is the one place files live.
   const [results, setResults] = useState<JobLinkResult[]>([]);
   const [scrapeSummary, setScrapeSummary] = useState<ScrapeResult[]>([]);
+  // Which of the pasted links this profile has already generated from recently, and
+  // whether the user has decided to generate them regardless.
+  const [dupCheck, setDupCheck] = useState<DuplicateCheck | null>(null);
+  const [allowDuplicates, setAllowDuplicates] = useState(false);
 
   // --- ResumeGPT + job-description files ------------------------------------
   const [resumegptFiles, setResumegptFiles] = useState<File[]>([]);
@@ -166,6 +229,8 @@ export default function GeneratePage() {
   const refreshHistory = () => setHistorySignal((n) => n + 1);
 
   const links = useMemo(() => parseLinks(jobLinksText), [jobLinksText]);
+  // Asking on every keystroke would parse the history workbook per character typed.
+  const linksKey = useDebouncedValue(links.join('\n'), 500);
 
   // Stable identity: DriveCard fetches on a callback that depends on this one.
   const handleDriveStatus = useCallback((status: DriveStatus) => {
@@ -229,7 +294,50 @@ export default function GeneratePage() {
     loadJdList();
   }, [loadJdList]);
 
+  // Flag links this profile has already generated from, while they are still in the
+  // box. The generate call refuses them anyway; saying so up front is the difference
+  // between "12 of these are already done" and watching twelve of them get skipped one
+  // at a time. Re-run when the profile changes — the rule is per profile, so the same
+  // links can be all-new for one candidate and all-duplicates for another.
+  useEffect(() => {
+    const urls = linksKey ? linksKey.split('\n') : [];
+    if (!urls.length || !candidateName) {
+      setDupCheck(null);
+      return undefined;
+    }
+    let live = true;
+    axios
+      .post<DuplicateCheck>(`${API_BASE_URL}/api/check-duplicate-urls`, {
+        urls,
+        candidate_name: candidateName.trim(),
+      })
+      .then((res) => {
+        if (live) setDupCheck(res.data);
+      })
+      // A failed check is not worth a toast: it costs the user the warning, not the
+      // protection — the generate call makes the same check server-side.
+      .catch(() => {
+        if (live) setDupCheck(null);
+      });
+    return () => {
+      live = false;
+    };
+  }, [linksKey, candidateName]);
+
+  // The warning belongs to the links that were checked; anything typed since is
+  // unchecked, and showing a stale count against a changed list would be a lie.
+  const duplicateIndexes = useMemo(() => {
+    if (!dupCheck || linksKey !== links.join('\n')) return new Set<number>();
+    return new Set(dupCheck.duplicates.map((d) => d.index));
+  }, [dupCheck, linksKey, links]);
+  const newLinkCount = links.length - duplicateIndexes.size;
+
   // --- Actions --------------------------------------------------------------
+
+  const dropDuplicateLinks = () => {
+    setJobLinksText(links.filter((_, i) => !duplicateIndexes.has(i)).join('\n'));
+    setAllowDuplicates(false);
+  };
 
   const scrapeAll = async () => {
     if (links.length === 0) {
@@ -243,16 +351,25 @@ export default function GeneratePage() {
       const res = await axios.post<{
         results?: ScrapeResult[];
         success_count?: number;
+        skipped_count?: number;
         total?: number;
         message?: string;
-      }>(`${API_BASE_URL}/api/scrape-job-urls`, { candidate_name: candidateName.trim() });
+      }>(`${API_BASE_URL}/api/scrape-job-urls`, {
+        candidate_name: candidateName.trim(),
+        allow_duplicates: allowDuplicates,
+      });
       const scraped = res.data.results || [];
       setScrapeSummary(scraped);
       const succeeded = res.data.success_count ?? scraped.filter((r) => r.success).length;
+      const skipped = res.data.skipped_count ?? scraped.filter((r) => r.skipped).length;
       const total = res.data.total ?? links.length;
       const description = res.data.message || 'Saved to job_descriptions/{profile}/{date}/.';
-      if (succeeded === total) notify.success(`Scraped all ${total} ${plural(total, 'job')}.`, description);
-      else if (succeeded > 0) notify.warning(`Scraped ${succeeded} of ${total}.`, description);
+      // Duplicates are counted out of the total: a batch where every link was already
+      // generated scraped nothing, and that is the expected outcome, not a failure.
+      const attempted = total - skipped;
+      if (attempted === 0) notify.info(`All ${total} ${plural(total, 'link')} were already generated.`, description);
+      else if (succeeded === attempted) notify.success(`Scraped all ${attempted} ${plural(attempted, 'job')}.`, description);
+      else if (succeeded > 0) notify.warning(`Scraped ${succeeded} of ${attempted}.`, description);
       else notify.error('Could not scrape any of those links.', description);
     } catch (err) {
       notify.error(errorDetail(err, 'Scrape failed.'));
@@ -294,18 +411,35 @@ export default function GeneratePage() {
             has_pdf?: boolean;
             resume_pdf_error?: string | null;
             drive?: DriveOutcome | null;
+            skipped?: boolean;
+            message?: string;
+            duplicate?: DuplicateUrl | null;
           }>(`${API_BASE_URL}/api/generate-resume/${jobIndex}`, {
             candidate_name: candidateName.trim(),
+            allow_duplicates: allowDuplicates,
           });
-          resultList.push({
-            jobIndex,
-            url: links[jobIndex],
-            success: true,
-            folderName: response.data.folder_name,
-            hasPdf: !!response.data.has_pdf,
-            resumePdfError: response.data.resume_pdf_error || null,
-            drive: response.data.drive || null,
-          });
+          // A duplicate answers 200 with nothing generated — no resume, no cost, no
+          // history row. Recorded as neither a success nor a failure.
+          if (response.data.skipped) {
+            resultList.push({
+              jobIndex,
+              url: links[jobIndex],
+              success: false,
+              skipped: true,
+              duplicate: response.data.duplicate || null,
+              error: response.data.message,
+            });
+          } else {
+            resultList.push({
+              jobIndex,
+              url: links[jobIndex],
+              success: true,
+              folderName: response.data.folder_name,
+              hasPdf: !!response.data.has_pdf,
+              resumePdfError: response.data.resume_pdf_error || null,
+              drive: response.data.drive || null,
+            });
+          }
         } catch (err) {
           resultList.push({
             jobIndex,
@@ -318,8 +452,13 @@ export default function GeneratePage() {
 
       setResults(resultList);
       const succeeded = resultList.filter((r) => r.success).length;
+      const skipped = resultList.filter((r) => r.skipped).length;
       if (succeeded > 0) refreshHistory();
-      notify.batch(succeeded, total, plural(total, 'resume'), 'Find them in Generated resumes above.');
+      const note = skipped
+        ? `${skipped} ${plural(skipped, 'link')} skipped — already generated for ${candidateName}.`
+        : 'Find them in Generated resumes above.';
+      if (skipped === total) notify.info(`Nothing to do — all ${total} were already generated.`, note);
+      else notify.batch(succeeded, total - skipped, plural(total - skipped, 'resume'), note);
     } catch (err) {
       notify.error(errorDetail(err, 'Error uploading job URLs or generating resumes.'));
     } finally {
@@ -384,18 +523,35 @@ export default function GeneratePage() {
           has_pdf?: boolean;
           resume_pdf_error?: string | null;
           drive?: DriveOutcome | null;
+          skipped?: boolean;
+          message?: string;
+          duplicate?: DuplicateUrl | null;
         }>(`${API_BASE_URL}/api/generate-from-job-description/${i}`, {
           candidate_name: candidateName.trim(),
+          allow_duplicates: allowDuplicates,
         });
-        resultList.push({
-          jdIndex: i,
-          filename: jdList.job_descriptions[i]?.filename,
-          success: true,
-          folderName: res.data.folder_name,
-          hasPdf: !!res.data.has_pdf,
-          resumePdfError: res.data.resume_pdf_error || null,
-          drive: res.data.drive || null,
-        });
+        // Files this app scraped carry the posting's URL, so an uploaded job
+        // description can be a duplicate too.
+        if (res.data.skipped) {
+          resultList.push({
+            jdIndex: i,
+            filename: jdList.job_descriptions[i]?.filename,
+            success: false,
+            skipped: true,
+            duplicate: res.data.duplicate || null,
+            error: res.data.message,
+          });
+        } else {
+          resultList.push({
+            jdIndex: i,
+            filename: jdList.job_descriptions[i]?.filename,
+            success: true,
+            folderName: res.data.folder_name,
+            hasPdf: !!res.data.has_pdf,
+            resumePdfError: res.data.resume_pdf_error || null,
+            drive: res.data.drive || null,
+          });
+        }
       } catch (err) {
         resultList.push({
           jdIndex: i,
@@ -408,8 +564,13 @@ export default function GeneratePage() {
     setJdProgress(NO_PROGRESS);
     setJdResults(resultList);
     const succeeded = resultList.filter((r) => r.success).length;
+    const skipped = resultList.filter((r) => r.skipped).length;
     if (succeeded > 0) refreshHistory();
-    notify.batch(succeeded, total, plural(total, 'resume'), 'Find them in Generated resumes above.');
+    const note = skipped
+      ? `${skipped} skipped — already generated for ${candidateName}.`
+      : 'Find them in Generated resumes above.';
+    if (skipped === total) notify.info(`Nothing to do — all ${total} were already generated.`, note);
+    else notify.batch(succeeded, total - skipped, plural(total - skipped, 'resume'), note);
     setJdLoading(false);
   };
 
@@ -599,6 +760,67 @@ export default function GeneratePage() {
                 />
               </Field>
 
+              {duplicateIndexes.size > 0 && (
+                <Alert
+                  tone="warning"
+                  title={`${duplicateIndexes.size} of these ${links.length} ${plural(links.length, 'link')} ${duplicateIndexes.size === 1 ? 'was' : 'were'} already generated for ${candidateName}`}
+                >
+                  <p>
+                    A posting is only written once per profile within{' '}
+                    {dupCheck?.window_days ?? 30} days — after that it counts as new again.
+                    {allowDuplicates ? (
+                      <>
+                        {' '}
+                        All <span className="font-medium">{links.length}</span> will be
+                        generated anyway.
+                      </>
+                    ) : (
+                      <>
+                        {' '}
+                        {duplicateIndexes.size === 1 ? 'It is' : 'They are'} skipped, so{' '}
+                        <span className="font-medium">
+                          {newLinkCount} {plural(newLinkCount, 'resume')}
+                        </span>{' '}
+                        will be generated.
+                      </>
+                    )}
+                  </p>
+                  <ul className="mt-2 space-y-0.5 text-xs">
+                    {dupCheck?.duplicates.slice(0, 5).map((d) => (
+                      <li key={d.index} className="break-all">
+                        {d.url}
+                        <span className="opacity-80">
+                          {' '}
+                          — {d.in_batch ? 'repeated in this list' : `generated ${d.last_used}`}
+                          {d.company ? ` · ${d.company}` : ''}
+                          {d.role ? ` · ${d.role}` : ''}
+                        </span>
+                      </li>
+                    ))}
+                    {(dupCheck?.duplicates.length ?? 0) > 5 && (
+                      <li className="opacity-80">
+                        …and {(dupCheck?.duplicates.length ?? 0) - 5} more.
+                      </li>
+                    )}
+                  </ul>
+                  <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                    <Button variant="secondary" onClick={dropDuplicateLinks} disabled={busy}>
+                      Remove them from the list
+                    </Button>
+                    {/* The escape hatch: a reposted job under the same URL is a real
+                        case, and the user is the one who can tell. */}
+                    <CheckboxField
+                      checked={allowDuplicates}
+                      onCheckedChange={setAllowDuplicates}
+                      disabled={busy}
+                      className="bg-transparent"
+                    >
+                      Generate them anyway
+                    </CheckboxField>
+                  </div>
+                </Alert>
+              )}
+
               <div className="flex flex-wrap gap-2">
                 {/* Scraping only saves job descriptions — it costs nothing and needs no Drive. */}
                 <Button
@@ -634,7 +856,11 @@ export default function GeneratePage() {
               {scrapeSummary.length > 0 && !scraping && (
                 <p className="text-xs text-muted">
                   Last scrape: {scrapeSummary.filter((r) => r.success).length}/{scrapeSummary.length}{' '}
-                  job {plural(scrapeSummary.length, 'description')} saved.
+                  job {plural(scrapeSummary.length, 'description')} saved
+                  {scrapeSummary.some((r) => r.skipped)
+                    ? `, ${scrapeSummary.filter((r) => r.skipped).length} skipped as already generated`
+                    : ''}
+                  .
                 </p>
               )}
 
@@ -642,6 +868,8 @@ export default function GeneratePage() {
                 results={results}
                 label={(r) => `Job ${r.jobIndex + 1}: ${r.url}`}
               />
+
+              <GenerationSkips results={results} label={(r) => `Job ${r.jobIndex + 1}: ${r.url}`} />
             </div>
 
             {/* --- From job description files --- */}
@@ -719,6 +947,13 @@ export default function GeneratePage() {
               <GenerationFailures
                 results={jdResults}
                 label={(r) => r.filename || `job_${r.jdIndex + 1}.txt`}
+              />
+
+              <GenerationSkips
+                results={jdResults}
+                label={(r) => r.filename || `job_${r.jdIndex + 1}.txt`}
+                allowDuplicates={allowDuplicates}
+                onAllowDuplicates={setAllowDuplicates}
               />
             </div>
           </div>

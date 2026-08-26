@@ -39,6 +39,35 @@ export interface DriveOutcome {
 
 // --- Generation ------------------------------------------------------------
 
+/**
+ * One job posting this profile already generated from, and when.
+ *
+ * `in_batch` marks a repeat inside the list the user just pasted rather than a row in
+ * the history table — there is no past generation to point at, only an earlier copy of
+ * the same link a few lines up.
+ */
+export interface DuplicateUrl {
+  url: string;
+  /** ISO day of the generation this duplicates. */
+  last_used: string;
+  days_ago: number;
+  company?: string;
+  role?: string;
+  history_id?: string;
+  window_days: number;
+  in_batch?: boolean;
+  /** One line of prose the backend wrote to explain the skip. */
+  reason?: string;
+}
+
+export interface DuplicateCheck {
+  profile: string;
+  window_days: number;
+  total: number;
+  count: number;
+  duplicates: Array<DuplicateUrl & { index: number }>;
+}
+
 export interface GenerationResult {
   success: boolean;
   error?: string;
@@ -46,6 +75,13 @@ export interface GenerationResult {
   hasPdf?: boolean;
   resumePdfError?: string | null;
   drive?: DriveOutcome | null;
+  /**
+   * Nothing was generated and nothing went wrong: this URL had already been used by
+   * this profile inside the duplicate window, so the model was never called. Counted
+   * apart from both successes and failures.
+   */
+  skipped?: boolean;
+  duplicate?: DuplicateUrl | null;
 }
 
 export interface JobLinkResult extends GenerationResult {
@@ -62,6 +98,9 @@ export interface ScrapeResult {
   success: boolean;
   url?: string;
   error?: string;
+  /** Skipped as a duplicate rather than attempted and failed — see GenerationResult. */
+  skipped?: boolean;
+  duplicate?: DuplicateUrl | null;
 }
 
 export interface TxtConversionResult {
