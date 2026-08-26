@@ -136,12 +136,26 @@ export interface HistoryRow {
   company?: string;
   role?: string;
   url?: string;
-  /** True when the signed-in user is the one who generated it. */
+  /**
+   * True when the signed-in user is the one who generated it — so its Drive folder is
+   * already theirs to open. For everyone else the folder lives in the generator's Drive
+   * and is opened via /api/history/drive-link, which grants access first.
+   */
   mine?: boolean;
   owner_email?: string;
   downloadable?: boolean;
   drive_folder_id?: string;
   files: HistoryFile[];
+}
+
+/** Where a history row's documents are, once the caller is allowed to see them. */
+export interface HistoryDriveLinkResponse {
+  /** The Drive folder URL to open. */
+  link: string;
+  /** True when this call newly granted the caller access to somebody else's folder. */
+  shared: boolean;
+  /** True when the folder was the caller's own and no grant was needed. */
+  mine: boolean;
 }
 
 export interface HistoryResponse {

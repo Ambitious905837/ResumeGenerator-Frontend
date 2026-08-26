@@ -13,11 +13,11 @@ import {
 } from 'lucide-react';
 import { API_BASE_URL } from '../auth';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
-import { blobErrorDetail, saveBlob } from '../lib/download';
+import { blobErrorDetail, errorDetail, saveBlob } from '../lib/download';
 import { formatNumber, plural, truncate } from '../lib/format';
 import { notify } from '../lib/notify';
 import { cn } from '../lib/cn';
-import type { HistoryResponse, HistoryRow } from '../types/api';
+import type { HistoryDriveLinkResponse, HistoryResponse, HistoryRow } from '../types/api';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { Card, CardBody, CardFooter, CardHeader } from './ui/card';
@@ -25,6 +25,7 @@ import { Checkbox } from './ui/checkbox';
 import { FilterLabel, Input, SearchInput } from './ui/field';
 import { EmptyState, TableSkeleton } from './ui/feedback';
 import { Pagination } from './ui/pagination';
+import { Spinner } from './ui/spinner';
 import { Table, TableWrap, TBody, TD, TH, THead, TR } from './ui/table';
 import { HintWrap, Tooltip } from './ui/tooltip';
 
@@ -289,7 +290,7 @@ export function HistoryPanel({
       <CardHeader
         icon={FileStack}
         title="Generated resumes"
-        description="Every resume generated for the selected profile — by you or by anyone else assigned it, so you can see what has already been applied for. Tick the ones you want and download them as a ZIP, including resumes from earlier sessions."
+        description="Every resume generated for the selected profile — by you or by anyone else assigned it, so you can see what has already been applied for. Click a row's file count to open its folder in Google Drive, or tick the ones you want and download them as a ZIP."
         actions={
           <>
             <Badge tone="neutral">
@@ -497,6 +498,7 @@ export function HistoryPanel({
                     <HistoryTableRow
                       key={row.id}
                       row={row}
+                      candidateName={candidateName}
                       selected={selectedIds.has(row.id)}
                       onToggle={() => toggleRow(row.id)}
                     />
@@ -523,12 +525,101 @@ export function HistoryPanel({
   );
 }
 
+/** Shared by both halves of the Files cell, so the row reads the same either way. */
+const FILE_LINK_CLASS = 'inline-flex items-center gap-1 text-brand hover:underline';
+
+/**
+ * The "n files" link: opens that generation's folder in Google Drive.
+ *
+ * The folder lives in the Drive of whoever generated the resume, created with
+ * `drive.file` scope and shared with nobody, so a plain link only ever worked for its
+ * owner. For everyone else the click asks the server first, which grants this user read
+ * access to that one folder using the owner's credentials and returns the link.
+ *
+ * The tab is opened *before* awaiting that request, because a `window.open` that happens
+ * after an await is no longer attributable to the click and browsers block it. It starts
+ * blank and is pointed at Drive when the answer arrives - or closed again if it doesn't.
+ * `noopener` is deliberately not passed to `open`: with it the call returns null and
+ * there is no tab left to redirect. The handle is severed by hand instead.
+ */
+function DriveFolderLink({ row, candidateName }: { row: HistoryRow; candidateName: string }) {
+  const [opening, setOpening] = useState(false);
+  const fileNames = row.files.map((f) => f.name).join(', ');
+  const label = `${row.files.length} ${plural(row.files.length, 'file')}`;
+  const folderUrl = `https://drive.google.com/drive/folders/${row.drive_folder_id}`;
+
+  if (row.mine) {
+    return (
+      <a
+        href={folderUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        className={FILE_LINK_CLASS}
+        title={fileNames}
+      >
+        {label}
+        <ExternalLink className="h-3 w-3" aria-hidden="true" />
+      </a>
+    );
+  }
+
+  const open = async () => {
+    if (opening) return;
+    const tab = window.open('about:blank', '_blank');
+    if (tab) tab.opener = null;
+    setOpening(true);
+    try {
+      const params: { id: string; candidate_name?: string } = { id: row.id };
+      if (candidateName.trim()) params.candidate_name = candidateName.trim();
+      const res = await axios.post<HistoryDriveLinkResponse>(
+        `${API_BASE_URL}/api/history/drive-link`,
+        params
+      );
+      if (tab) tab.location.href = res.data.link;
+      // The popup was blocked despite the click - fall back to this tab rather than
+      // silently doing nothing.
+      else window.location.href = res.data.link;
+    } catch (err) {
+      tab?.close();
+      notify.error(
+        'Could not open the Drive folder',
+        errorDetail(err, 'Google Drive did not grant access to this folder.')
+      );
+    } finally {
+      setOpening(false);
+    }
+  };
+
+  return (
+    <Tooltip
+      content={`Open in Google Drive - ${row.owner_email || 'whoever generated this'} shares the folder with you`}
+    >
+      <button
+        type="button"
+        onClick={open}
+        disabled={opening}
+        className={cn(FILE_LINK_CLASS, 'disabled:opacity-60')}
+        title={fileNames}
+      >
+        {label}
+        {opening ? (
+          <Spinner className="h-3 w-3" />
+        ) : (
+          <ExternalLink className="h-3 w-3" aria-hidden="true" />
+        )}
+      </button>
+    </Tooltip>
+  );
+}
+
 function HistoryTableRow({
   row,
+  candidateName,
   selected,
   onToggle,
 }: {
   row: HistoryRow;
+  candidateName: string;
   selected: boolean;
   onToggle: () => void;
 }) {
@@ -595,20 +686,10 @@ function HistoryTableRow({
       </TD>
       <TD className="text-right">
         {row.downloadable ? (
-          // The Drive folder is in the generator's own account and is not shared, so
-          // only link it for them. Everyone else downloads through the ZIP button,
-          // which fetches with the owner's token.
-          row.drive_folder_id && row.mine ? (
-            <a
-              href={`https://drive.google.com/drive/folders/${row.drive_folder_id}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 text-brand hover:underline"
-              title={fileNames}
-            >
-              {row.files.length} {plural(row.files.length, 'file')}
-              <ExternalLink className="h-3 w-3" aria-hidden="true" />
-            </a>
+          // Rows from before folder ids were recorded have files but no folder to open;
+          // they stay a plain count and are downloaded through the ZIP button.
+          row.drive_folder_id ? (
+            <DriveFolderLink row={row} candidateName={candidateName} />
           ) : (
             <span className="tabular-nums text-muted" title={fileNames}>
               {row.files.length}
