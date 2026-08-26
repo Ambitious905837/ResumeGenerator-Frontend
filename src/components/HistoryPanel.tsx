@@ -14,7 +14,7 @@ import {
 import { API_BASE_URL } from '../auth';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import { blobErrorDetail, errorDetail, saveBlob } from '../lib/download';
-import { formatNumber, plural, truncate } from '../lib/format';
+import { formatNumber, plural } from '../lib/format';
 import { notify } from '../lib/notify';
 import { cn } from '../lib/cn';
 import type { HistoryDriveLinkResponse, HistoryResponse, HistoryRow } from '../types/api';
@@ -659,27 +659,33 @@ function HistoryTableRow({
           {row.role || '—'}
         </span>
       </TD>
+      {/* The cell is capped and the link laid out as a *block* flex row: an inline-flex
+          anchor is sized shrink-to-fit from its content, so an unbreakable URL made the
+          cell wider than the cap and spilled over the next column. */}
       <TD className="max-w-[18rem]">
         {row.url ? (
           <a
             href={row.url}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 text-brand hover:underline"
+            className="flex w-full items-center gap-1 text-brand hover:underline"
             title={row.url}
           >
-            <span className="truncate">{truncate(row.url, 44)}</span>
+            <span className="truncate">{row.url}</span>
             <ExternalLink className="h-3 w-3 shrink-0" aria-hidden="true" />
           </a>
         ) : (
           <span className="text-subtle">—</span>
         )}
       </TD>
-      <TD>
+      <TD className="max-w-[14rem]">
         {row.mine ? (
           <Badge tone="brand">You</Badge>
         ) : (
-          <span className="text-xs text-muted" title={row.owner_email || 'Another user of this profile'}>
+          <span
+            className="block truncate text-xs text-muted"
+            title={row.owner_email || 'Another user of this profile'}
+          >
             {row.owner_email || '—'}
           </span>
         )}
