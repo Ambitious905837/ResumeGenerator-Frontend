@@ -128,6 +128,10 @@ export interface HistoryFile {
 
 export interface HistoryRow {
   id: string;
+  /**
+   * When it was generated, as `YYYY-MM-DD HH:MM:SS`. Rows written before the time of
+   * day was recorded carry the date alone.
+   */
   date?: string;
   company?: string;
   role?: string;

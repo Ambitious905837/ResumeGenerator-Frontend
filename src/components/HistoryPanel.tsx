@@ -43,8 +43,31 @@ interface DownloadBody {
   ids?: string[];
   date_from?: string;
   date_to?: string;
+  time_from?: string;
+  time_to?: string;
   search?: string;
   candidate_name?: string;
+}
+
+/** The from/to filter above the table. A time is only meaningful beside its own date. */
+interface DateRange {
+  dateFrom: string;
+  timeFrom: string;
+  dateTo: string;
+  timeTo: string;
+}
+
+const EMPTY_RANGE: DateRange = { dateFrom: '', timeFrom: '', dateTo: '', timeTo: '' };
+
+/**
+ * A history row's stamp split for the table: ["2026-08-25", "14:32"].
+ *
+ * Rows generated before the time of day was recorded carry a bare date, so the time
+ * half comes back empty and the table shows a dash rather than a made-up midnight.
+ */
+function splitStamp(raw: string): [string, string] {
+  const [day = '', rest = ''] = (raw || '').trim().replace('T', ' ').split(' ');
+  return [day.slice(0, 10), rest.slice(0, 5)];
 }
 
 /**
@@ -69,8 +92,8 @@ export function HistoryPanel({
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
+  const [range, setRange] = useState<DateRange>(EMPTY_RANGE);
+  const { dateFrom, timeFrom, dateTo, timeTo } = range;
   const [searchInput, setSearchInput] = useState('');
   const [downloading, setDownloading] = useState(false);
   // Bumped to force a refetch with identical filters — the Refresh button, and the
@@ -91,6 +114,8 @@ export function HistoryPanel({
       if (candidateName.trim()) params.candidate_name = candidateName.trim();
       if (dateFrom) params.date_from = dateFrom;
       if (dateTo) params.date_to = dateTo;
+      if (timeFrom) params.time_from = timeFrom;
+      if (timeTo) params.time_to = timeTo;
       if (search) params.search = search;
       const res = await axios.get<HistoryResponse>(`${API_BASE_URL}/api/company-roles-history`, {
         params,
@@ -101,7 +126,7 @@ export function HistoryPanel({
     } finally {
       setLoading(false);
     }
-  }, [candidateName, page, dateFrom, dateTo, search, nonce]);
+  }, [candidateName, page, dateFrom, dateTo, timeFrom, timeTo, search, nonce]);
 
   useEffect(() => {
     load();
@@ -185,9 +210,19 @@ export function HistoryPanel({
     });
   };
 
-  const applyDateFilter = (from: string, to: string) => {
-    setDateFrom(from);
-    setDateTo(to);
+  /**
+   * Narrow the range and go back to a clean first page.
+   *
+   * Clearing a date clears the time beside it: the server ignores a time with no date
+   * of its own, and leaving one on screen would show a filter that isn't being applied.
+   */
+  const applyRange = (patch: Partial<DateRange>) => {
+    setRange((prev) => {
+      const next = { ...prev, ...patch };
+      if (!next.dateFrom) next.timeFrom = '';
+      if (!next.dateTo) next.timeTo = '';
+      return next;
+    });
     setPage(1);
     setSelectedIds(new Set());
   };
@@ -196,7 +231,7 @@ export function HistoryPanel({
 
   const clearFilters = () => {
     setSearchInput('');
-    applyDateFilter('', '');
+    applyRange(EMPTY_RANGE);
   };
 
   /**
@@ -239,6 +274,8 @@ export function HistoryPanel({
     const body: DownloadBody = {};
     if (dateFrom) body.date_from = dateFrom;
     if (dateTo) body.date_to = dateTo;
+    if (timeFrom) body.time_from = timeFrom;
+    if (timeTo) body.time_to = timeTo;
     if (search) body.search = search;
     const name =
       dateFrom && dateTo
@@ -289,30 +326,60 @@ export function HistoryPanel({
             />
           </div>
 
+          {/* Date and time are one control each side of the range: the time narrows the
+              day its date picked, and is disabled until there is a day to narrow. Left
+              empty it means the whole day — midnight to 23:59:59 — so a date-only
+              filter still reads as the plain "that day" it always did. */}
           <div className="space-y-1.5">
             <FilterLabel>
               <CalendarDays className="mr-1 inline h-3 w-3" aria-hidden="true" />
               From
             </FilterLabel>
-            <Input
-              type="date"
-              className="w-[9.5rem]"
-              value={dateFrom}
-              max={dateTo || undefined}
-              onChange={(e) => applyDateFilter(e.target.value, dateTo)}
-              aria-label="Generated on or after"
-            />
+            <div className="flex items-center gap-1.5">
+              <Input
+                type="date"
+                className="w-[9.5rem]"
+                value={dateFrom}
+                max={dateTo || undefined}
+                onChange={(e) => applyRange({ dateFrom: e.target.value })}
+                aria-label="Generated on or after"
+              />
+              <HintWrap hint={dateFrom ? undefined : 'Pick a From date first'} disabled={!dateFrom}>
+                <Input
+                  type="time"
+                  className="w-[7.5rem]"
+                  value={timeFrom}
+                  disabled={!dateFrom}
+                  max={dateTo && dateTo === dateFrom ? timeTo || undefined : undefined}
+                  onChange={(e) => applyRange({ timeFrom: e.target.value })}
+                  aria-label="Generated at or after this time of day"
+                />
+              </HintWrap>
+            </div>
           </div>
           <div className="space-y-1.5">
             <FilterLabel>To</FilterLabel>
-            <Input
-              type="date"
-              className="w-[9.5rem]"
-              value={dateTo}
-              min={dateFrom || undefined}
-              onChange={(e) => applyDateFilter(dateFrom, e.target.value)}
-              aria-label="Generated on or before"
-            />
+            <div className="flex items-center gap-1.5">
+              <Input
+                type="date"
+                className="w-[9.5rem]"
+                value={dateTo}
+                min={dateFrom || undefined}
+                onChange={(e) => applyRange({ dateTo: e.target.value })}
+                aria-label="Generated on or before"
+              />
+              <HintWrap hint={dateTo ? undefined : 'Pick a To date first'} disabled={!dateTo}>
+                <Input
+                  type="time"
+                  className="w-[7.5rem]"
+                  value={timeTo}
+                  disabled={!dateTo}
+                  min={dateFrom && dateFrom === dateTo ? timeFrom || undefined : undefined}
+                  onChange={(e) => applyRange({ timeTo: e.target.value })}
+                  aria-label="Generated at or before this time of day"
+                />
+              </HintWrap>
+            </div>
           </div>
 
           {hasFilters && (
@@ -377,7 +444,7 @@ export function HistoryPanel({
         )}
 
         {loading && rows.length === 0 ? (
-          <TableSkeleton rows={5} columns={6} />
+          <TableSkeleton rows={5} columns={7} />
         ) : data.total === 0 ? (
           data.total_unfiltered === 0 ? (
             <EmptyState
@@ -417,6 +484,7 @@ export function HistoryPanel({
                       </Tooltip>
                     </TH>
                     <TH>Date</TH>
+                    <TH>Time</TH>
                     <TH>Company</TH>
                     <TH>Role</TH>
                     <TH>Job URL</TH>
@@ -465,6 +533,7 @@ function HistoryTableRow({
   onToggle: () => void;
 }) {
   const fileNames = row.files.map((f) => f.name).join(', ');
+  const [day, time] = splitStamp(row.date || '');
   return (
     <TR selected={selected}>
       <TD className="pl-4">
@@ -485,7 +554,14 @@ function HistoryTableRow({
           </span>
         </Tooltip>
       </TD>
-      <TD className="whitespace-nowrap tabular-nums text-muted">{(row.date || '').slice(0, 10)}</TD>
+      <TD className="whitespace-nowrap tabular-nums text-muted">{day || '—'}</TD>
+      <TD className="whitespace-nowrap tabular-nums text-muted">
+        {time || (
+          <Tooltip content="Generated before the time of day was recorded">
+            <span className="text-subtle">&mdash;</span>
+          </Tooltip>
+        )}
+      </TD>
       <TD className="font-medium">{row.company || '—'}</TD>
       <TD className="max-w-[16rem]">
         <span className="block truncate" title={row.role}>
